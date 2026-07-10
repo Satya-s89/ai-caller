@@ -23,11 +23,11 @@ from dotenv import load_dotenv
 sys.path.append(str(Path(__file__).resolve().parent.parent))
 load_dotenv(dotenv_path=Path(__file__).resolve().parent.parent / ".env")
 
-from livekit.agents import AgentSession, AutoSubscribe, JobContext, WorkerOptions, cli
+from livekit.agents import AgentSession, AutoSubscribe, JobContext, WorkerOptions, cli, TurnHandlingOptions
 from livekit.agents.inference import VAD
 from livekit.plugins import groq
 
-from agent import TeluguVoiceAssistant
+from agent import TeluguVoiceAssistant, AssistantTools
 from plugins.indic_stt import IndicSTT
 from plugins.indic_tts import IndicTTS
 from call_log.db import log_call_start, log_call_end
@@ -61,9 +61,9 @@ async def entrypoint(ctx: JobContext) -> None:
     llm_instance = groq.LLM(model="llama-3.3-70b-versatile")
     tts_instance = IndicTTS()
     vad_instance = VAD(
-        min_speech_duration=0.05,
-        min_silence_duration=0.4,
-        activation_threshold=0.4,
+        min_speech_duration=0.2,
+        min_silence_duration=0.6,
+        activation_threshold=0.5,
     )
 
     # Pass plugins to the agent constructor
@@ -75,11 +75,15 @@ async def entrypoint(ctx: JobContext) -> None:
     # The agent class uses the VAD from session or agent property
     agent._vad = vad_instance
 
+    fnc_ctx = AssistantTools()
+
     session = AgentSession(
         stt=stt_instance,
         llm=llm_instance,
         tts=tts_instance,
         vad=vad_instance,
+        turn_options=TurnHandlingOptions(aec_warmup_duration=0.1),
+        fnc_ctx=fnc_ctx,
     )
 
     await session.start(room=ctx.room, agent=agent)
@@ -92,8 +96,8 @@ async def entrypoint(ctx: JobContext) -> None:
         # Extract transcript from session history
         transcript = []
         try:
-            # session.history is a ChatContext object in 1.6.x
-            for msg in session.history.messages():
+            # session.chat_ctx is the ChatContext object in 1.6.x
+            for msg in session.chat_ctx.messages:
                 role = getattr(msg, "role", "")
                 content = getattr(msg, "text_content", "") or getattr(msg, "content", "")
                 if role and content:

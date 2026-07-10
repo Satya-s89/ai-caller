@@ -3,7 +3,7 @@ agent/plugins/indic_tts.py
 ---------------------------
 LiveKit Agents 1.6.5 custom TTS plugin.
 
-Proxies synthesis requests to the local IndicF5 TTS service
+Proxies text to the local IndicF5 TTS service
 (tts_service/main.py running on TTS_SERVICE_URL).
 
 Usage in AgentSession:
@@ -18,17 +18,22 @@ import logging
 import os
 import uuid
 import wave
+import asyncio
 
 import httpx
 from dotenv import load_dotenv
+from livekit import rtc
 from livekit.agents import tts
-from livekit.agents.types import DEFAULT_API_CONNECT_OPTIONS, APIConnectOptions
+from livekit.agents.types import (
+    DEFAULT_API_CONNECT_OPTIONS,
+    APIConnectOptions,
+)
 
 load_dotenv()
 logger = logging.getLogger("agent.indic_tts")
 
-TTS_SERVICE_URL = os.getenv("TTS_SERVICE_URL", "http://localhost:8002")
-SAMPLE_RATE = int(os.getenv("CALL_SAMPLE_RATE", "8000"))
+TTS_SERVICE_URL = os.getenv("TTS_SERVICE_URL", "http://127.0.0.1:8002")
+SAMPLE_RATE = int(os.getenv("CALL_SAMPLE_RATE", "16000"))
 
 
 def _parse_wav(wav_bytes: bytes) -> tuple[bytes, int, int]:
@@ -41,13 +46,15 @@ def _parse_wav(wav_bytes: bytes) -> tuple[bytes, int, int]:
     return raw, sr, nc
 
 
-class IndicTTSStream(tts.ChunkedStream):
-    """Streams synthesized audio frames from the local TTS service."""
+class IndicTTSStream(tts.SynthesizeStream):
+    """Hits the local TTS endpoint and pushes the resulting audio chunks."""
 
-    def __init__(self, tts_instance: "IndicTTS", text: str, opts: APIConnectOptions):
-        super().__init__(tts=tts_instance, input_text=text, conn_options=opts)
+    def __init__(self, tts_instance: "IndicTTS", input_text: str, opts: APIConnectOptions):
+        super().__init__(tts=tts_instance, conn_options=opts)
+        self._input_text = input_text
 
     async def _run(self, output_emitter: tts.AudioEmitter) -> None:
+        initialized = False
         try:
             async with httpx.AsyncClient(timeout=60.0) as client:
                 resp = await client.post(
@@ -64,17 +71,31 @@ class IndicTTSStream(tts.ChunkedStream):
                 num_channels=nc,
                 mime_type="audio/pcm",
             )
-            output_emitter.push(raw_pcm)
+            initialized = True
+
+            # Chunk raw PCM into 20ms blocks to prevent audio packet drops/stuttering
+            # 20ms chunk size = sample_rate * num_channels * 2 bytes (16-bit) * 0.02s
+            chunk_size = int(sr * nc * 2 * 0.02)
+            for i in range(0, len(raw_pcm), chunk_size):
+                chunk = raw_pcm[i:i + chunk_size]
+                samples_per_channel = len(chunk) // (2 * nc)
+                audio_frame = rtc.AudioFrame(
+                    data=chunk,
+                    sample_rate=sr,
+                    num_channels=nc,
+                    samples_per_channel=samples_per_channel,
+                )
+                output_emitter.push(audio_frame)
 
         except Exception:
             logger.exception("TTS service call failed")
-            # Safely initialize the emitter to prevent the job runner from crashing with "AudioEmitter isn't started"
-            output_emitter.initialize(
-                request_id=str(uuid.uuid4()),
-                sample_rate=SAMPLE_RATE,
-                num_channels=1,
-                mime_type="audio/pcm",
-            )
+            if not initialized:
+                output_emitter.initialize(
+                    request_id=str(uuid.uuid4()),
+                    sample_rate=SAMPLE_RATE,
+                    num_channels=1,
+                    mime_type="audio/pcm",
+                )
 
 
 class IndicTTS(tts.TTS):
