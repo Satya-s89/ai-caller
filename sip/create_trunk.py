@@ -2,11 +2,10 @@
 sip/create_trunk.py
 --------------------
 Creates a LiveKit SIP inbound trunk for Exotel.
-Run after you have configured your trunk in LiveKit / Exotel.
+Run after you have configured your SIP in the Exotel dashboard.
 
-Required env vars:
+Required env vars (in .env):
     LIVEKIT_URL, LIVEKIT_API_KEY, LIVEKIT_API_SECRET
-    EXOTEL_SIP_URI   e.g. sip:your-account@sip.exotel.com
 
 Usage:
     py sip/create_trunk.py
@@ -14,96 +13,72 @@ Usage:
 
 from __future__ import annotations
 
+import asyncio
 import os
 import sys
 from pathlib import Path
 
-import httpx
 from dotenv import load_dotenv
 
-# Load env from root directory
 load_dotenv(dotenv_path=Path(__file__).resolve().parent.parent / ".env")
 
 LIVEKIT_URL = os.getenv("LIVEKIT_URL", "")
 LIVEKIT_API_KEY = os.getenv("LIVEKIT_API_KEY", "")
 LIVEKIT_API_SECRET = os.getenv("LIVEKIT_API_SECRET", "")
-EXOTEL_SIP_URI = os.getenv("EXOTEL_SIP_URI", "")
 
 
-def get_livekit_token() -> str:
-    """Generate admin token for LiveKit API."""
-    try:
-        from livekit.api import AccessToken
-        # Create token with admin/SIP permissions
-        token = AccessToken(LIVEKIT_API_KEY, LIVEKIT_API_SECRET)
-        token.add_grant(room_join=True, room_create=True, admin=True)
-        # Convert LiveKit token to JWT representation
-        return token.to_jwt()
-    except Exception as exc:
-        print(f"Failed to generate LiveKit token: {exc}")
-        sys.exit(1)
-
-
-def main() -> None:
+async def main() -> None:
     if not all([LIVEKIT_URL, LIVEKIT_API_KEY, LIVEKIT_API_SECRET]):
-        print("[ERROR] LiveKit credentials not fully set in .env")
+        print("[ERROR] LIVEKIT_URL, LIVEKIT_API_KEY, LIVEKIT_API_SECRET must be set in .env")
         sys.exit(1)
-
-    # Clean the HTTP/HTTPS scheme to get the base domain for REST API
-    # e.g., wss://project.livekit.cloud -> https://project.livekit.cloud
-    api_url = LIVEKIT_URL.replace("wss://", "https://").replace("ws://", "http://")
-
-    # Generate Authorization Header token
-    token = get_livekit_token()
-    headers = {
-        "Authorization": f"Bearer {token}",
-        "Content-Type": "application/json",
-    }
-
-    # Inbound trunk configuration for Exotel
-    # Since we want Exotel to route to us, we define an inbound SIP trunk.
-    trunk_payload = {
-        "trunk": {
-            "name": "Exotel Inbound Trunk",
-            "numbers": [],  # Leave empty to accept any incoming numbers, or specify yours
-            "metadata": "Exotel telephone integration trunk",
-            "inbound_addresses": [
-                # Exotel SIP server IPs (or domain)
-                "sip.exotel.com",
-            ],
-        }
-    }
-
-    print(f"Connecting to LiveKit REST API at: {api_url}")
-    print("Creating inbound SIP trunk...")
 
     try:
-        with httpx.Client(timeout=30) as client:
-            resp = client.post(
-                f"{api_url}/twirp/livekit.SIP/CreateSIPInboundTrunk",
-                json=trunk_payload,
-                headers=headers,
-            )
-
-        if resp.status_code == 200:
-            data = resp.json()
-            trunk = data.get("trunk", {})
-            print()
-            print("=" * 60)
-            print("  SIP Inbound Trunk Created Successfully! ✓")
-            print(f"  Trunk ID : {trunk.get('sip_trunk_id')}")
-            print(f"  Name     : {trunk.get('name')}")
-            print("=" * 60)
-            print()
-            print("Copy the Trunk ID above to use with the dispatch rule script:")
-            print(f"  py sip/create_dispatch_rule.py --trunk-id {trunk.get('sip_trunk_id')}")
-        else:
-            print(f"[ERROR] HTTP {resp.status_code}: {resp.text}")
-            sys.exit(1)
-    except Exception as exc:
-        print(f"[ERROR] Connection failed: {exc}")
+        from livekit import api as lk_api
+    except ImportError:
+        print("[ERROR] livekit-api not installed. Run: py -m pip install livekit-api")
         sys.exit(1)
+
+    lk = lk_api.LiveKitAPI(
+        url=LIVEKIT_URL,
+        api_key=LIVEKIT_API_KEY,
+        api_secret=LIVEKIT_API_SECRET,
+    )
+
+    print(f"Connecting to: {LIVEKIT_URL}")
+    print("Creating Exotel inbound SIP trunk...")
+
+    try:
+        from livekit.protocol.sip import (  # type: ignore
+            CreateSIPInboundTrunkRequest,
+            SIPInboundTrunkInfo,
+        )
+
+        req = CreateSIPInboundTrunkRequest(
+            trunk=SIPInboundTrunkInfo(
+                name="Exotel Inbound Trunk",
+                metadata="Routes Exotel calls to Telugu voice agent",
+                # Exotel's SIP gateway IPs / domain — accept calls from these
+                allowed_addresses=["sip.exotel.com"],
+            )
+        )
+        trunk = await lk.sip.create_sip_inbound_trunk(req)
+
+        print()
+        print("=" * 60)
+        print("  SIP Inbound Trunk Created Successfully! ✓")
+        print(f"  Trunk ID : {trunk.sip_trunk_id}")
+        print(f"  Name     : {trunk.name}")
+        print("=" * 60)
+        print()
+        print("Run the dispatch rule script next:")
+        print(f"  py sip/create_dispatch_rule.py --trunk-id {trunk.sip_trunk_id}")
+
+    except Exception as exc:
+        print(f"[ERROR] Failed to create trunk: {type(exc).__name__}: {exc}")
+        sys.exit(1)
+    finally:
+        await lk.aclose()
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
