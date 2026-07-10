@@ -110,27 +110,37 @@ See [`.env.example`](.env.example) for all variables with descriptions.
 | Stage | Description | Status |
 |---|---|---|
 | 1 | Project scaffold | ✅ Done |
-| 2 | Telugu STT service | 🔜 |
-| 3 | Telugu TTS service | 🔜 |
-| 4 | LiveKit agent | 🔜 |
-| 5 | Exotel SIP integration | 🔜 |
-| 6 | Call log & polish | 🔜 |
+| 2 | Telugu STT service | ✅ Done |
+| 3 | Telugu TTS service | ✅ Done |
+| 4 | LiveKit agent | ✅ Done |
+| 5 | Exotel SIP integration | ✅ Done |
+| 6 | Call log & polish | ✅ Done |
 
 ---
 
-## Stage 5 — Exotel Manual Steps (preview)
+## Running the Call Log Viewer
 
-These steps require the Exotel dashboard and cannot be automated from code:
+All inbound calls, caller phone numbers, call durations, and complete Telugu transcripts are automatically saved in a local SQLite database (`call_log/calls.db`).
 
-1. **Contact Exotel support** to enable SIP trunk / VoIP gateway for your account.
-2. In the Exotel dashboard → **SIP Settings**, add the LiveKit SIP URI
-   (`your-project.india.sip.livekit.cloud`) as the outbound SIP destination.
-3. Map your DID (Exotel phone number) to the SIP trunk.
-4. Run `sip/create_trunk.py` to register the trunk in LiveKit.
-5. Run `sip/create_dispatch_rule.py --trunk-id <ID>` to create the dispatch rule.
-6. Make a test call to your Exotel number and watch the agent logs.
+You can view the recent call history and transcripts directly in your CLI using:
+```powershell
+py call_log/viewer.py
+```
 
-Full instructions will be written in Stage 5.
+---
+
+## Stage 5 — Exotel Setup Instructions
+
+1. **Enable SIP trunking**: Log in to your Exotel dashboard and ensure you have a VoIP gateway/SIP trunk enabled.
+2. **Obtain inbound SIP details**: In the Exotel dashboard → **SIP Settings**, register your LiveKit SIP URI (e.g. `your-project.livekit.cloud`) as the outbound SIP destination.
+3. **Register the Trunk in LiveKit**: Run the script to create the inbound trunk on the LiveKit side:
+   ```powershell
+   py sip/create_trunk.py
+   ```
+4. **Link rules**: Create the rule directing calls on that trunk to the `telugu-voice-agent` room:
+   ```powershell
+   py sip/create_dispatch_rule.py --trunk-id <TRUNK_ID>
+   ```
 
 ---
 
