@@ -67,23 +67,21 @@ async def entrypoint(ctx: JobContext) -> None:
     )
 
     # Pass plugins to the agent constructor
+    fnc_ctx = AssistantTools()
     agent = TeluguVoiceAssistant(
         stt=stt_instance,
         llm=llm_instance,
         tts=tts_instance,
+        fnc_ctx=fnc_ctx,
     )
     # The agent class uses the VAD from session or agent property
     agent._vad = vad_instance
-
-    fnc_ctx = AssistantTools()
 
     session = AgentSession(
         stt=stt_instance,
         llm=llm_instance,
         tts=tts_instance,
         vad=vad_instance,
-        turn_options=TurnHandlingOptions(aec_warmup_duration=0.1),
-        fnc_ctx=fnc_ctx,
     )
 
     await session.start(room=ctx.room, agent=agent)

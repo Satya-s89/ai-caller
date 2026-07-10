@@ -26,12 +26,13 @@ SYSTEM_PROMPT = (
 class TeluguVoiceAssistant(Agent):
     """Telugu-language voice agent for phone calls."""
 
-    def __init__(self, *, stt: stt.STT, llm: llm.LLM, tts: tts.TTS) -> None:
+    def __init__(self, *, stt: stt.STT, llm: llm.LLM, tts: tts.TTS, fnc_ctx: llm.ToolContext | None = None) -> None:
         super().__init__(
             instructions=SYSTEM_PROMPT,
             stt=stt,
             llm=llm,
             tts=tts,
+            tools=[fnc_ctx] if fnc_ctx else [],
         )
 
 logger = logging.getLogger("agent.tools")
@@ -42,17 +43,27 @@ class AssistantTools(llm.ToolContext):
     def __init__(self):
         super().__init__([])
 
-    @llm.function_tool(description="Gets the account status for a given phone number.")
+    @llm.function_tool(description="Gets the account status and balance for a given phone number.")
     async def check_account_status(
         self,
         phone_number: str,
     ) -> str:
-        """Called when the user asks about their account status or account standing."""
+        """Called when the user asks about their account status, balance, or standing."""
         logger.info(f"Checking account status for {phone_number}")
-        # Mock logic
-        if phone_number.endswith("9999"):
-            return "The account is suspended due to unpaid dues."
-        return "The account is active and in good standing."
+        import sys
+        from pathlib import Path
+        sys.path.append(str(Path(__file__).resolve().parent.parent))
+        import crm.db
+        
+        customer = crm.db.get_customer_status(phone_number)
+        if not customer:
+            return f"I could not find an account associated with the phone number {phone_number}."
+            
+        status = customer["account_status"]
+        balance = customer["balance"]
+        name = customer["name"]
+        
+        return f"The account for {name} is currently '{status}' with a balance of ${balance}."
 
     @llm.function_tool(description="Gets the operating hours for a specific store location.")
     async def get_store_hours(
@@ -61,5 +72,15 @@ class AssistantTools(llm.ToolContext):
     ) -> str:
         """Called when the user asks when a store opens or closes."""
         logger.info(f"Getting store hours for {location}")
-        # Mock logic
-        return f"The store at {location} is open from 9 AM to 9 PM, Monday through Saturday."
+        import sys
+        from pathlib import Path
+        sys.path.append(str(Path(__file__).resolve().parent.parent))
+        import crm.db
+        
+        store = crm.db.get_store_info(location)
+        if not store:
+            return f"I could not find a store location matching {location}."
+            
+        open_time = store["open_time"]
+        close_time = store["close_time"]
+        return f"The {store['location']} store is open from {open_time} to {close_time}."

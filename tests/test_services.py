@@ -117,12 +117,14 @@ async def test_assistant_tools_function_calling():
     
     # Test checking account status
     status_good = await tools.check_account_status(phone_number="1234567890")
-    assert "good standing" in status_good.lower(), "Good standing logic failed"
+    assert "Active" in status_good, "SQLite Active status fetch failed"
+    assert "150.0" in status_good, "SQLite balance fetch failed"
     
     status_bad = await tools.check_account_status(phone_number="5555559999")
-    assert "suspended" in status_bad.lower(), "Suspended logic failed"
+    assert "Suspended" in status_bad, "SQLite suspended status fetch failed"
     
     # Test getting store hours
-    hours = await tools.get_store_hours(location="Hyderabad")
-    assert "Hyderabad" in hours
-    assert "9 AM" in hours
+    hours = await tools.get_store_hours(location="Vijayawada")
+    assert "Vijayawada" in hours
+    assert "10:00 AM" in hours
+    assert "8:00 PM" in hours
