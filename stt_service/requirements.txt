@@ -1,0 +1,22 @@
+fastapi>=0.111.0
+uvicorn[standard]>=0.29.0
+python-multipart>=0.0.9
+python-dotenv>=1.0.0
+
+# IndicConformer via quantized ONNX (CPU-only, no GPU required)
+# Auto-downloads ai4bharat/indic-conformer-600m-quantized on first run (~675 MB).
+# Telugu language code: "te"
+indic-asr-onnx>=0.1.0
+huggingface_hub>=0.23.0   # required by indic-asr-onnx (undeclared dep)
+# IMPORTANT: torchcodec (pulled in by indic-asr-onnx) breaks on Python 3.13+/Windows
+# without FFmpeg shared DLLs. Uninstall it so indic-asr-onnx falls back to torchaudio:
+#   py -m pip uninstall torchcodec -y
+
+# NOTE: pydub is intentionally NOT used here.
+# Audio handling uses Python's built-in `wave` module (for WAV/PCM)
+# and ffmpeg subprocess (for MP3/OGG/FLAC — optional).
+# This avoids the audioop/pyaudioop incompatibility on Python 3.13+.
+#
+# ffmpeg is optional (only needed for non-WAV formats):
+#   Windows: winget install ffmpeg
+#   Linux:   sudo apt install ffmpeg

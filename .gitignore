@@ -1,0 +1,55 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+.Python
+pip-wheel-metadata/
+
+# Virtual environments
+.venv/
+venv/
+env/
+.env
+*.env
+
+# Secrets / config (keep .env.example, ignore .env)
+.env
+!.env.example
+
+# Model caches (can be hundreds of MB / GB)
+.cache/
+~/.cache/huggingface/
+indic_asr_onnx_models/
+hf_models/
+# indic-asr-onnx downloads models here by default
+indic_models/
+onnx_models/
+
+# Audio test outputs
+tests/output*.wav
+tests/sample*.wav
+tests/sim_output/
+tts_service/reference/output*.wav
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# SQLite call log
+call_log/calls.db
+
+# Logs
+*.log
+logs/

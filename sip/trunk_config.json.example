@@ -1,0 +1,10 @@
+{
+  "_comment": "Template for LiveKit SIP inbound trunk — fill in after contacting Exotel support.",
+  "trunk": {
+    "name": "exotel-inbound-trunk",
+    "numbers": ["+91XXXXXXXXXX"],
+    "allowed_addresses": [],
+    "auth_username": "",
+    "auth_password": ""
+  }
+}

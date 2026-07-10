@@ -1,0 +1,12 @@
+# ai-caller — root meta requirements
+# This file documents which service owns which requirements.
+# Each service has its own virtualenv — see the service subdirectory.
+#
+# Quick-start:
+#   cd stt_service  && python -m venv .venv && .venv/Scripts/activate && pip install -r requirements.txt
+#   cd tts_service  && python -m venv .venv && .venv/Scripts/activate && pip install -r requirements.txt
+#   cd agent        && python -m venv .venv && .venv/Scripts/activate && pip install -r requirements.txt
+#
+# Dev/test utilities (install in whichever venv you're testing from):
+httpx>=0.27.0
+python-dotenv>=1.0.0

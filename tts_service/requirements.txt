@@ -1,0 +1,20 @@
+fastapi>=0.111.0
+uvicorn[standard]>=0.29.0
+python-dotenv>=1.0.0
+
+# IndicF5 voice-cloning TTS for Indian languages (including Telugu)
+# Requires trust_remote_code=True when loading.
+# First run downloads ~1 GB of model weights from Hugging Face.
+transformers>=4.41.0
+huggingface_hub>=0.23.0
+
+# PyTorch (already installed via stt_service — share the same system Python)
+# If installing fresh: py -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+torch>=2.2.0
+
+# Audio processing — scipy for resampling (24kHz -> 8kHz phone audio)
+# numpy and scipy come with torch but listed explicitly for clarity
+scipy>=1.13.0
+numpy>=1.26.0
+
+# soundfile is NOT required — we use stdlib wave for WAV writing
