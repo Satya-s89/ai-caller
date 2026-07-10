@@ -3,17 +3,12 @@ agent/main.py
 -------------
 LiveKit agent entrypoint.
 
-Starts a worker that:
-  1. Connects to a LiveKit room (assigned by the server / dispatch rule).
-  2. Wires IndicSTT → Groq/Llama 3.3 (FREE) → IndicTTS into an AgentSession.
-  3. Logs call metadata and transcripts to local SQLite database.
+Wires IndicSTT → Groq/Llama 3.3 (FREE) → IndicTTS into an AgentSession.
+Logs call metadata and transcripts to local SQLite database on shutdown.
 
-Run locally (test room):
+Run:
     cd agent
     py main.py dev
-
-Run as a persistent worker (production):
-    py main.py start
 """
 
 from __future__ import annotations
@@ -25,12 +20,11 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-# Add project root to python path to resolve local imports (like call_log)
 sys.path.append(str(Path(__file__).resolve().parent.parent))
-
 load_dotenv(dotenv_path=Path(__file__).resolve().parent.parent / ".env")
 
 from livekit.agents import AgentSession, AutoSubscribe, JobContext, WorkerOptions, cli
+from livekit.agents.inference import VAD
 from livekit.plugins import groq
 
 from agent import TeluguVoiceAssistant
@@ -38,11 +32,11 @@ from plugins.indic_stt import IndicSTT
 from plugins.indic_tts import IndicTTS
 from call_log.db import log_call_start, log_call_end
 
-logger = logging.getLogger("agent.main")
 logging.basicConfig(
     level=os.getenv("LOG_LEVEL", "INFO").upper(),
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
 )
+logger = logging.getLogger("agent.main")
 
 
 async def entrypoint(ctx: JobContext) -> None:
@@ -50,53 +44,72 @@ async def entrypoint(ctx: JobContext) -> None:
 
     await ctx.connect(auto_subscribe=AutoSubscribe.AUDIO_ONLY)
 
-    # Detect if there's a SIP caller participant
+    # Detect SIP caller from remote participants
     caller_phone = "Unknown"
-    for participant in ctx.room.active_participants.values():
-        identity = participant.identity
-        if identity.startswith("sip_") or "sip" in identity.lower():
+    for participant in ctx.room.remote_participants.values():
+        identity = participant.identity or ""
+        if "sip" in identity.lower():
             caller_phone = identity.replace("sip_", "")
             break
 
-    # Log call start in SQLite
+    # Log call start
     log_call_start(call_id=ctx.room.name, caller_phone=caller_phone)
+    logger.info("Call started — room: %s, caller: %s", ctx.room.name, caller_phone)
 
-    session = AgentSession(
-        stt=IndicSTT(),
-        llm=groq.LLM(model="llama-3.3-70b-versatile"),  # FREE via Groq
-        tts=IndicTTS(),
+    # Instantiate plugins
+    stt_instance = IndicSTT()
+    llm_instance = groq.LLM(model="llama-3.3-70b-versatile")
+    tts_instance = IndicTTS()
+    vad_instance = VAD(
+        min_speech_duration=0.05,
+        min_silence_duration=0.4,
+        activation_threshold=0.4,
     )
 
-    await session.start(room=ctx.room, agent=TeluguVoiceAssistant())
+    # Pass plugins to the agent constructor
+    agent = TeluguVoiceAssistant(
+        stt=stt_instance,
+        llm=llm_instance,
+        tts=tts_instance,
+    )
+    # The agent class uses the VAD from session or agent property
+    agent._vad = vad_instance
+
+    session = AgentSession(
+        stt=stt_instance,
+        llm=llm_instance,
+        tts=tts_instance,
+        vad=vad_instance,
+    )
+
+    await session.start(room=ctx.room, agent=agent)
     logger.info("AgentSession started in room: %s", ctx.room.name)
 
-    # Wait for the session / room to close
-    while ctx.room.is_connected:
-        await asyncio.sleep(1)
+    # Register shutdown callback — called automatically when the room disconnects
+    async def on_shutdown(reason: str) -> None:
+        logger.info("Call ended (reason: %s) — room: %s", reason, ctx.room.name)
 
-    # Fetch conversation history on disconnect
-    transcript = []
-    try:
-        # Get history from AgentSession conversation object
-        history = session.conversation.get_history()
-        for msg in history:
-            transcript.append({
-                "role": "user" if msg.role == "user" else "assistant",
-                "content": msg.text or "",
-            })
-    except Exception as exc:
-        logger.error("Failed to extract conversation history: %s", exc)
+        # Extract transcript from session history
+        transcript = []
+        try:
+            # session.history is a ChatContext object in 1.6.x
+            for msg in session.history.messages():
+                role = getattr(msg, "role", "")
+                content = getattr(msg, "text_content", "") or getattr(msg, "content", "")
+                if role and content:
+                    transcript.append({"role": str(role), "content": str(content)})
+        except Exception as exc:
+            logger.warning("Could not extract transcript: %s", exc)
 
-    # Log call end
-    log_call_end(call_id=ctx.room.name, transcript=transcript)
-    logger.info("AgentSession ended and logged for room: %s", ctx.room.name)
+        log_call_end(call_id=ctx.room.name, transcript=transcript)
+
+    ctx.add_shutdown_callback(on_shutdown)
 
 
 if __name__ == "__main__":
-    import asyncio  # required for sleep loop in entrypoint
     cli.run_app(
         WorkerOptions(
             entrypoint_fnc=entrypoint,
-            agent_name="telugu-voice-agent",   # used by SIP dispatch rule
+            agent_name="telugu-voice-agent",
         )
     )
