@@ -23,13 +23,14 @@ from dotenv import load_dotenv
 sys.path.append(str(Path(__file__).resolve().parent.parent))
 load_dotenv(dotenv_path=Path(__file__).resolve().parent.parent / ".env")
 
-from livekit.agents import AgentSession, AutoSubscribe, JobContext, WorkerOptions, cli, TurnHandlingOptions
+from livekit.agents import AgentSession, AutoSubscribe, JobContext, WorkerOptions, cli
 from livekit.agents.inference import VAD
 from livekit.plugins import groq
 
 from agent import TeluguVoiceAssistant, AssistantTools
-from plugins.indic_stt import IndicSTT
 from plugins.indic_tts import IndicTTS
+from plugins.local_stt import LocalWhisperSTT
+from plugins.sarvam_stt import SarvamSTT
 from call_log.db import log_call_start, log_call_end
 
 logging.basicConfig(
@@ -56,14 +57,51 @@ async def entrypoint(ctx: JobContext) -> None:
     log_call_start(call_id=ctx.room.name, caller_phone=caller_phone)
     logger.info("Call started — room: %s, caller: %s", ctx.room.name, caller_phone)
 
-    # Instantiate plugins
-    stt_instance = IndicSTT()
+    # ── STT ─────────────────────────────────────────────────────────────────
+    # Priority: sarvam (best Telugu) → groq whisper → local faster-whisper
+    stt_provider = os.getenv("STT_PROVIDER", "sarvam").lower()
+
+    if stt_provider == "sarvam" and os.getenv("SARVAM_API_KEY"):
+        logger.info("STT: Sarvam saarika-v2 (best Telugu accuracy)")
+        stt_instance = SarvamSTT(language="te-IN")
+
+    elif stt_provider == "local":
+        logger.info("STT: faster-whisper (local)")
+        stt_instance = LocalWhisperSTT(model_size="medium", language="te")
+
+    else:
+        # Groq Whisper fallback (or when SARVAM_API_KEY not set)
+        if stt_provider == "sarvam":
+            logger.warning("SARVAM_API_KEY not set — falling back to Groq Whisper")
+        logger.info("STT: Groq whisper-large-v3 (cloud, Telugu + English)")
+        stt_instance = groq.STT(
+            model="whisper-large-v3",
+            language="te",
+            prompt=(
+                "తెలుగు customer care call. Tanglish conversation. "
+                "నమస్కారం. account status. balance. phone number. "
+                "store timings. ఖాతా. active. inactive. rupees. "
+                "hello. hi. what can you do. thank you. store hours."
+            ),
+        )
+
+    # ── LLM ─────────────────────────────────────────────────────────────────
+    # 70b handles Telugu/Tanglish far better than 8b — quality > micro-speed gain
     llm_instance = groq.LLM(model="llama-3.3-70b-versatile")
+
+    # ── TTS ─────────────────────────────────────────────────────────────────
     tts_instance = IndicTTS()
+
+    # ── VAD ─────────────────────────────────────────────────────────────────
+    # min_speech_duration=0.3  → require 300ms of real speech before triggering STT
+    #                            (prevents Whisper from hallucinating on breath/noise)
+    # min_silence_duration=0.4 → wait 400ms of silence before processing
+    #                            (gives user time to finish their sentence)
+    # activation_threshold=0.6 → slightly higher so background noise doesn't trigger
     vad_instance = VAD(
-        min_speech_duration=0.2,
-        min_silence_duration=0.6,
-        activation_threshold=0.5,
+        min_speech_duration=0.3,
+        min_silence_duration=0.4,
+        activation_threshold=0.6,
     )
 
     # Pass plugins to the agent constructor
@@ -94,12 +132,19 @@ async def entrypoint(ctx: JobContext) -> None:
         # Extract transcript from session history
         transcript = []
         try:
-            # session.chat_ctx is the ChatContext object in 1.6.x
-            for msg in session.chat_ctx.messages:
-                role = getattr(msg, "role", "")
-                content = getattr(msg, "text_content", "") or getattr(msg, "content", "")
+            # Try different attribute paths for LiveKit 1.6.x compatibility
+            messages = []
+            if hasattr(session, 'chat_ctx') and session.chat_ctx is not None:
+                messages = getattr(session.chat_ctx, 'messages', [])
+            elif hasattr(session, '_activity') and session._activity is not None:
+                chat_ctx = getattr(session._activity, 'chat_ctx', None)
+                if chat_ctx:
+                    messages = getattr(chat_ctx, 'items', [])
+            for msg in messages:
+                role = getattr(msg, 'role', '')
+                content = getattr(msg, 'text_content', '') or getattr(msg, 'content', '')
                 if role and content:
-                    transcript.append({"role": str(role), "content": str(content)})
+                    transcript.append({'role': str(role), 'content': str(content)})
         except Exception as exc:
             logger.warning("Could not extract transcript: %s", exc)
 

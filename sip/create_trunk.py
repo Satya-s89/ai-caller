@@ -61,7 +61,7 @@ async def main() -> None:
                 allowed_addresses=["sip.exotel.com"],
             )
         )
-        trunk = await lk.sip.create_sip_inbound_trunk(req)
+        trunk = await lk.sip.create_inbound_trunk(req)
 
         print()
         print("=" * 60)

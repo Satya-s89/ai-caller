@@ -1,12 +1,10 @@
-# ai-caller — root meta requirements
-# This file documents which service owns which requirements.
-# Each service has its own virtualenv — see the service subdirectory.
+# ai-caller — install all dependencies with:
+#   cd agent && pip install -r requirements.txt
 #
-# Quick-start:
-#   cd stt_service  && python -m venv .venv && .venv/Scripts/activate && pip install -r requirements.txt
-#   cd tts_service  && python -m venv .venv && .venv/Scripts/activate && pip install -r requirements.txt
-#   cd agent        && python -m venv .venv && .venv/Scripts/activate && pip install -r requirements.txt
-#
-# Dev/test utilities (install in whichever venv you're testing from):
-httpx>=0.27.0
-python-dotenv>=1.0.0
+# Then run the whole system:
+#   py run.py  (from project root)
+
+# ── Shared utilities (install alongside agent) ─────────────────────────────
+aiohttp>=3.9.0        # used by sarvam_stt.py (Sarvam AI STT API)
+httpx>=0.27.0         # HTTP client for tests
+python-dotenv>=1.0.0  # .env loading

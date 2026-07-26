@@ -66,7 +66,7 @@ async def main(trunk_id: str) -> None:
                 )
             ),
         )
-        rule = await lk.sip.create_sip_dispatch_rule(req)
+        rule = await lk.sip.create_dispatch_rule(req)
 
         print()
         print("=" * 60)
