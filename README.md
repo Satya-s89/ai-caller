@@ -1,8 +1,19 @@
 # ai-caller — Telugu AI Phone Agent
 
-A Telugu-language AI voice agent for inbound phone calls.
+A real-time Telugu-language AI voice agent that answers actual phone calls via **Twilio + LiveKit**.
 
-**Pipeline:** Exotel (PSTN) → LiveKit SIP bridge → IndicConformer STT → Claude → IndicF5 TTS → Exotel
+**Pipeline:** Twilio (+1 517 551 2681) → LiveKit SIP → Sarvam STT → Groq LLaMA → Sarvam TTS
+
+---
+
+## Features
+
+- 🎙️ **Telugu STT**: Sarvam `saarika:v2.5` — built for Indic languages
+- 🤖 **LLM**: Groq Llama 3.3 70B — free, fast cloud inference  
+- 🔊 **Telugu TTS**: Sarvam `bulbul:v2` — natural Indian Telugu voice
+- 📞 **Real Phone Calls**: Twilio SIP → LiveKit bridge
+- 📊 **Live Dashboard**: `http://localhost:3000` — call history & transcripts
+- 🧠 **Tanglish**: Natural Telugu + English code-switching
 
 ---
 
@@ -10,13 +21,35 @@ A Telugu-language AI voice agent for inbound phone calls.
 
 ```
 ai-caller/
-├── stt_service/     FastAPI wrapping AI4Bharat IndicConformer (STT)  — port 8001
-├── tts_service/     FastAPI wrapping AI4Bharat IndicF5 (TTS)         — port 8002
-├── agent/           LiveKit Agents worker (STT + Claude + TTS)
-├── tests/           Test scripts and local conversation simulator
-├── sip/             One-shot scripts: LiveKit SIP trunk + dispatch rule (Stage 5)
-├── call_log/        SQLite call log + HTTP viewer (Stage 6)
-└── .env.example     All required environment variables (copy → .env)
+├── agent/
+│   ├── main.py           # LiveKit agent entry point
+│   ├── agent.py          # System prompt + tool definitions
+│   ├── plugins/
+│   │   ├── sarvam_stt.py # Sarvam AI STT (primary, Telugu-native)
+│   │   ├── local_stt.py  # faster-whisper fallback (offline)
+│   │   └── indic_tts.py  # Sarvam TTS / Edge TTS streaming
+│   └── requirements.txt
+├── dashboard/
+│   ├── app.py            # aiohttp dashboard server (port 3000)
+│   └── static/
+│       └── index.html    # Live call monitoring UI
+├── call_log/
+│   ├── db.py             # SQLite call log helpers
+│   └── calls.db          # Auto-created on first call
+├── crm/
+│   └── db.py             # Customer lookup
+├── sip/
+│   ├── fix_sip.py        # One-shot: clean + recreate SIP trunk
+│   ├── create_trunk.py   # Create LiveKit inbound trunk
+│   └── create_dispatch_rule.py
+├── deploy/
+│   ├── setup.sh          # Automated Ubuntu/Debian server setup
+│   ├── ai-caller.service # systemd unit for 24/7 service
+│   └── README.md         # Server deployment guide
+├── tests/
+├── run.py                # Single-command launcher
+├── .env                  # API keys (never commit!)
+└── .env.example          # Template for .env
 ```
 
 ---
@@ -25,122 +58,97 @@ ai-caller/
 
 ### 1. Prerequisites
 
-- Python 3.10+
-- `ffmpeg` on PATH (required by pydub for audio decoding)
-- LiveKit Cloud account (free tier works)
-- Anthropic API key
+- **Python 3.10+**
+- **API keys** (all free tier):
+  - [Groq](https://console.groq.com) — LLM
+  - [Sarvam AI](https://dashboard.sarvam.ai) — STT + TTS
+  - [LiveKit Cloud](https://cloud.livekit.io) — WebRTC/SIP
+  - [Twilio](https://twilio.com) — Phone calls
 
-### 2. Clone and configure
+### 2. Clone & configure
 
 ```bash
-git clone <this-repo>
+git clone https://github.com/Satya-s89/ai-caller.git
 cd ai-caller
-cp .env.example .env
-# Edit .env — fill in ANTHROPIC_API_KEY, LIVEKIT_*, etc.
+copy .env.example .env      # Windows
+# cp .env.example .env      # Linux/Mac
 ```
 
-### 3. Start the STT service
+Edit `.env` and fill in your API keys.
 
-```bash
-cd stt_service
-python -m venv .venv
-.venv\Scripts\activate       # Windows
-pip install -r requirements.txt
-# First run downloads IndicConformer ONNX model (~300 MB)
-uvicorn main:app --host 0.0.0.0 --port 8001
-```
-
-### 4. Start the TTS service
-
-> **Important:** Place your ~5-second Telugu reference audio clip at
-> `tts_service/reference/telugu_reference.wav` and update `TTS_REFERENCE_TEXT` in `.env`.
-
-```bash
-cd tts_service
-python -m venv .venv
-.venv\Scripts\activate
-# Install PyTorch CPU wheel first:
-pip install torch --index-url https://download.pytorch.org/whl/cpu
-pip install -r requirements.txt
-# First run downloads IndicF5 model (~1 GB)
-uvicorn main:app --host 0.0.0.0 --port 8002
-```
-
-### 5. Run the agent (test room)
+### 3. Install dependencies
 
 ```bash
 cd agent
-python -m venv .venv
-.venv\Scripts\activate
 pip install -r requirements.txt
-python main.py dev
-# Opens a LiveKit test room — join from https://meet.livekit.io
+cd ..
+pip install -r requirements.txt
 ```
 
-### 6. Simulate a conversation (no LiveKit required)
+### 4. Run everything
 
 ```bash
-cd tests
-python simulate_conversation.py                     # text-mode with default prompts
-python simulate_conversation.py my_audio.wav        # WAV-mode
+py run.py
 ```
+
+This starts:
+- **AI Agent** — connects to LiveKit, waits for calls
+- **Dashboard** — live call viewer at `http://localhost:3000`
+
+### 5. Test via browser (no phone number needed)
+
+Open [LiveKit Playground](https://agents-playground.livekit.io) and connect with:
+- **URL**: `wss://ai-voice-1a5zwk2f.livekit.cloud`
+- **Agent**: `telugu-voice-agent`
+
+### 6. Test via real phone call
+
+Call **`+1 517 551 2681`** from your Twilio-verified number.
 
 ---
 
 ## Environment Variables
 
-See [`.env.example`](.env.example) for all variables with descriptions.
-
-| Variable | Purpose |
-|---|---|
-| `GROQ_API_KEY` | **Free** LLM API key — get at [console.groq.com](https://console.groq.com) |
-| `LIVEKIT_URL` | LiveKit Cloud WebSocket URL (**free tier** at [cloud.livekit.io](https://cloud.livekit.io)) |
-| `LIVEKIT_API_KEY` / `LIVEKIT_API_SECRET` | LiveKit credentials |
-| `STT_SERVICE_URL` | URL of the STT FastAPI service |
-| `TTS_SERVICE_URL` | URL of the TTS FastAPI service |
-| `TTS_REFERENCE_AUDIO` | Path to reference voice WAV for IndicF5 |
-| `TTS_REFERENCE_TEXT` | Transcript of the reference audio clip |
-| `CALL_SAMPLE_RATE` | Output audio sample rate (default `8000`) |
-| `LOG_LEVEL` | Logging verbosity (`INFO` / `DEBUG`) |
-
----
-
-## Build Stages
-
-| Stage | Description | Status |
+| Variable | Required | Description |
 |---|---|---|
-| 1 | Project scaffold | ✅ Done |
-| 2 | Telugu STT service | ✅ Done |
-| 3 | Telugu TTS service | ✅ Done |
-| 4 | LiveKit agent | ✅ Done |
-| 5 | Exotel SIP integration | ✅ Done |
-| 6 | Call log & polish | ✅ Done |
+| `GROQ_API_KEY` | ✅ | LLM — free at [console.groq.com](https://console.groq.com) |
+| `SARVAM_API_KEY` | ✅ | STT + TTS — free at [dashboard.sarvam.ai](https://dashboard.sarvam.ai) |
+| `LIVEKIT_URL` | ✅ | LiveKit Cloud WebSocket URL |
+| `LIVEKIT_API_KEY` | ✅ | LiveKit API key |
+| `LIVEKIT_API_SECRET` | ✅ | LiveKit API secret |
+| `STT_PROVIDER` | optional | `sarvam` (default) \| `groq` \| `local` |
+| `SARVAM_TTS_SPEAKER` | optional | `meera` (default) \| `pavithra` |
+| `TTS_VOICE` | optional | Edge TTS voice (fallback) — `te-IN-ShrutiNeural` |
+| `LOG_LEVEL` | optional | `INFO` (default) \| `DEBUG` |
+| `DASHBOARD_PORT` | optional | Dashboard port — default `3000` |
 
 ---
 
-## Running the Call Log Viewer
+## Telephony Setup (One-time)
 
-All inbound calls, caller phone numbers, call durations, and complete Telugu transcripts are automatically saved in a local SQLite database (`call_log/calls.db`).
+After configuring your Twilio Elastic SIP Trunk and linking your phone number:
 
-You can view the recent call history and transcripts directly in your CLI using:
-```powershell
-py call_log/viewer.py
+```bash
+# Reset and create clean LiveKit SIP trunk + dispatch rule
+py sip/fix_sip.py
 ```
 
+This handles:
+1. Deletes any old/conflicting trunks from LiveKit
+2. Creates a new inbound trunk for `+15175512681`
+3. Creates the dispatch rule routing to `telugu-voice-agent`
+
 ---
 
-## Stage 5 — Exotel Setup Instructions
+## Deploy to Server (24/7)
 
-1. **Enable SIP trunking**: Log in to your Exotel dashboard and ensure you have a VoIP gateway/SIP trunk enabled.
-2. **Obtain inbound SIP details**: In the Exotel dashboard → **SIP Settings**, register your LiveKit SIP URI (e.g. `your-project.livekit.cloud`) as the outbound SIP destination.
-3. **Register the Trunk in LiveKit**: Run the script to create the inbound trunk on the LiveKit side:
-   ```powershell
-   py sip/create_trunk.py
-   ```
-4. **Link rules**: Create the rule directing calls on that trunk to the `telugu-voice-agent` room:
-   ```powershell
-   py sip/create_dispatch_rule.py --trunk-id <TRUNK_ID>
-   ```
+See [`deploy/README.md`](deploy/README.md) for Oracle Cloud / VPS deployment.
+
+```bash
+chmod +x deploy/setup.sh
+./deploy/setup.sh
+sudo systemctl start ai-caller
+```
 
 ---
 

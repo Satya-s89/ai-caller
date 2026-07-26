@@ -106,3 +106,27 @@ def get_all_calls() -> list[dict]:
                 }
             )
         return calls
+
+
+def get_call_by_id(call_id: str) -> dict | None:
+    """Retrieve a single call record by call_id."""
+    init_db()
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM calls WHERE call_id = ?", (call_id,))
+        row = cursor.fetchone()
+        if not row:
+            return None
+        try:
+            tx = json.loads(row["transcript"])
+        except Exception:
+            tx = []
+        return {
+            "call_id": row["call_id"],
+            "caller_phone": row["caller_phone"],
+            "start_time": row["start_time"],
+            "end_time": row["end_time"],
+            "duration_seconds": row["duration_seconds"],
+            "transcript": tx,
+        }

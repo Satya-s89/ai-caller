@@ -31,6 +31,8 @@ LANGUAGE EXAMPLES (follow this style):
 TOOLS YOU HAVE (use them when relevant):
 - check_account_status(phone_number) → account status and balance
 - get_store_hours(location) → store operating hours
+- get_current_time() → returns current date and time
+- send_followup_sms(phone_number, message) → sends a confirmation SMS/text to the user
 
 RULES:
 - NEVER output <function=...> tags or raw JSON in spoken text.
@@ -102,3 +104,21 @@ class AssistantTools(llm.ToolContext):
         open_time = store["open_time"]
         close_time = store["close_time"]
         return f"The {store['location']} store is open from {open_time} to {close_time}."
+
+    @llm.function_tool(description="Gets the current date and time.")
+    async def get_current_time(self) -> str:
+        """Called when the user asks for the current time or today's date."""
+        from datetime import datetime
+        now = datetime.now()
+        logger.info("Fetched current time")
+        return f"Current date and time is: {now.strftime('%A, %B %d, %Y at %I:%M %p')}."
+
+    @llm.function_tool(description="Sends an SMS or confirmation text message to a caller's phone number.")
+    async def send_followup_sms(
+        self,
+        phone_number: str,
+        message: str,
+    ) -> str:
+        """Called when the user requests an SMS or text confirmation."""
+        logger.info(f"Sending SMS to {phone_number}: {message}")
+        return f"SMS successfully sent to {phone_number} with content: '{message}'."

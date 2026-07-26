@@ -50,6 +50,12 @@ Thumbs.db
 # SQLite call log
 call_log/calls.db
 
+# CRM database
+crm/crm.db
+
+# faster-whisper model cache
+faster_whisper_models/
+
 # Logs
 *.log
 logs/

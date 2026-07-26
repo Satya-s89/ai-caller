@@ -1,0 +1,17 @@
+[Unit]
+Description=AI Caller — Telugu Voice Assistant & Dashboard Service
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/ai-caller
+ExecStart=/usr/bin/python3 run.py
+Restart=always
+RestartSec=5
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONUTF8=1
+Environment=PYTHONIOENCODING=utf-8
+
+[Install]
+WantedBy=multi-user.target

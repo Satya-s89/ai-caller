@@ -1,8 +1,8 @@
 """
 sip/create_trunk.py
 --------------------
-Creates a LiveKit SIP inbound trunk for Exotel.
-Run after you have configured your SIP in the Exotel dashboard.
+Creates a LiveKit SIP Inbound Trunk for Twilio Elastic SIP Trunking.
+Run ONCE after you have set up your Twilio SIP Trunk.
 
 Required env vars (in .env):
     LIVEKIT_URL, LIVEKIT_API_KEY, LIVEKIT_API_SECRET
@@ -22,9 +22,16 @@ from dotenv import load_dotenv
 
 load_dotenv(dotenv_path=Path(__file__).resolve().parent.parent / ".env")
 
-LIVEKIT_URL = os.getenv("LIVEKIT_URL", "")
-LIVEKIT_API_KEY = os.getenv("LIVEKIT_API_KEY", "")
+LIVEKIT_URL        = os.getenv("LIVEKIT_URL", "")
+LIVEKIT_API_KEY    = os.getenv("LIVEKIT_API_KEY", "")
 LIVEKIT_API_SECRET = os.getenv("LIVEKIT_API_SECRET", "")
+
+# Twilio's SIP edge locations that send calls to us
+# See: https://www.twilio.com/docs/sip-trunking/regions
+TWILIO_SIP_ADDRESSES = [
+    "pstn.twilio.com",
+    "sip.twilio.com",
+]
 
 
 async def main() -> None:
@@ -45,7 +52,7 @@ async def main() -> None:
     )
 
     print(f"Connecting to: {LIVEKIT_URL}")
-    print("Creating Exotel inbound SIP trunk...")
+    print("Creating Twilio inbound SIP trunk in LiveKit...")
 
     try:
         from livekit.protocol.sip import (  # type: ignore
@@ -55,23 +62,25 @@ async def main() -> None:
 
         req = CreateSIPInboundTrunkRequest(
             trunk=SIPInboundTrunkInfo(
-                name="Exotel Inbound Trunk",
-                metadata="Routes Exotel calls to Telugu voice agent",
-                # Exotel's SIP gateway IPs / domain — accept calls from these
-                allowed_addresses=["sip.exotel.com"],
+                name="Twilio Inbound Trunk",
+                metadata="Routes Twilio calls to Telugu AI voice agent",
+                allowed_addresses=TWILIO_SIP_ADDRESSES,
             )
         )
         trunk = await lk.sip.create_inbound_trunk(req)
 
         print()
         print("=" * 60)
-        print("  SIP Inbound Trunk Created Successfully! ✓")
+        print("  SIP Inbound Trunk Created! ✓")
         print(f"  Trunk ID : {trunk.sip_trunk_id}")
         print(f"  Name     : {trunk.name}")
         print("=" * 60)
         print()
-        print("Run the dispatch rule script next:")
+        print("NEXT STEP — create the dispatch rule:")
         print(f"  py sip/create_dispatch_rule.py --trunk-id {trunk.sip_trunk_id}")
+        print()
+        print("ALSO — configure Twilio SIP Trunk to send calls to:")
+        print("  sip.livekit.cloud  (LiveKit's SIP endpoint)")
 
     except Exception as exc:
         print(f"[ERROR] Failed to create trunk: {type(exc).__name__}: {exc}")

@@ -1,8 +1,8 @@
 """
 sip/create_dispatch_rule.py
 ----------------------------
-Creates a LiveKit SIP dispatch rule routing inbound Exotel calls
-to the telugu-voice-agent worker room.
+Creates a LiveKit SIP Dispatch Rule that routes all inbound Twilio calls
+to the telugu-voice-agent worker.
 
 Required env vars (in .env):
     LIVEKIT_URL, LIVEKIT_API_KEY, LIVEKIT_API_SECRET
@@ -23,8 +23,8 @@ from dotenv import load_dotenv
 
 load_dotenv(dotenv_path=Path(__file__).resolve().parent.parent / ".env")
 
-LIVEKIT_URL = os.getenv("LIVEKIT_URL", "")
-LIVEKIT_API_KEY = os.getenv("LIVEKIT_API_KEY", "")
+LIVEKIT_URL        = os.getenv("LIVEKIT_URL", "")
+LIVEKIT_API_KEY    = os.getenv("LIVEKIT_API_KEY", "")
 LIVEKIT_API_SECRET = os.getenv("LIVEKIT_API_SECRET", "")
 
 
@@ -56,13 +56,13 @@ async def main(trunk_id: str) -> None:
         )
 
         req = CreateSIPDispatchRuleRequest(
-            name="Exotel→Telugu Agent Route",
-            metadata="Routes inbound Exotel calls to the Telugu voice agent room",
+            name="Twilio → Telugu AI Agent",
+            metadata="Routes inbound Twilio calls to the Telugu AI voice agent",
             trunk_ids=[trunk_id],
             rule=SIPDispatchRule(
                 dispatch_rule_direct=SIPDispatchRuleDirect(
                     room_name="sip-call",
-                    pin="",  # No PIN required
+                    pin="",     # No PIN — answer all calls
                 )
             ),
         )
@@ -70,13 +70,16 @@ async def main(trunk_id: str) -> None:
 
         print()
         print("=" * 60)
-        print("  SIP Dispatch Rule Created Successfully! ✓")
+        print("  SIP Dispatch Rule Created! ✓")
         print(f"  Rule ID  : {rule.sip_dispatch_rule_id}")
         print(f"  Name     : {rule.name}")
         print("=" * 60)
         print()
-        print("All done! Inbound calls on this trunk will spawn a LiveKit")
-        print("room named 'sip-call' and be handled by the Telugu agent.")
+        print("✅ All done! When someone calls your Twilio number:")
+        print("   Twilio → LiveKit → Room 'sip-call' → Telugu AI Agent")
+        print()
+        print("Make sure your agent is running:")
+        print("   py run.py")
 
     except Exception as exc:
         print(f"[ERROR] Failed to create dispatch rule: {type(exc).__name__}: {exc}")

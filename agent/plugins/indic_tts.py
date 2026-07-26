@@ -1,23 +1,26 @@
 """
 agent/plugins/indic_tts.py
 --------------------------
-Streaming TTS plugin using Microsoft Edge TTS (te-IN-ShrutiNeural).
+Streaming TTS plugin — Sarvam AI bulbul:v2 (primary) with Edge TTS fallback.
 
-KEY UPGRADE — sentence-level streaming:
-  Old path (batch):  Wait for full LLM response → synthesize → play
-  New path (stream): LLM token arrives → detect sentence end → synthesize
-                     immediately → start playing while LLM generates next sentence
+Provider selection:
+  - SARVAM_API_KEY set → Sarvam bulbul:v2  (natural Indian Telugu voice)
+  - SARVAM_API_KEY not set → Edge TTS te-IN-ShrutiNeural (Microsoft, free)
 
-This cuts perceived latency by ~0.5-1 s because the user hears the first
-sentence before the LLM has even finished the response.
+KEY FEATURE — sentence-level streaming:
+  LLM token arrives → detect sentence end → synthesize immediately →
+  start playing while LLM generates next sentence.
+  Cuts perceived latency by ~0.5-1 s.
 """
 
 from __future__ import annotations
 
+import base64
 import io
 import logging
 import os
 
+import aiohttp
 import edge_tts
 import numpy as np
 import soundfile as sf
@@ -26,20 +29,58 @@ from livekit.agents.types import DEFAULT_API_CONNECT_OPTIONS, APIConnectOptions
 
 logger = logging.getLogger("agent.indic_tts")
 
-EDGE_TTS_VOICE  = os.getenv("TTS_VOICE", "te-IN-ShrutiNeural")
-NATIVE_SR       = 24_000          # Edge TTS native sample rate
+EDGE_TTS_VOICE      = os.getenv("TTS_VOICE", "te-IN-ShrutiNeural")
+SARVAM_TTS_SPEAKER  = os.getenv("SARVAM_TTS_SPEAKER", "meera")   # meera | pavithra
+SARVAM_API_URL      = "https://api.sarvam.ai/text-to-speech"
+NATIVE_SR           = 22_050   # Sarvam native; Edge TTS is 24 kHz (detected at runtime)
 
-# Characters that mark the end of a speakable unit
-SENTENCE_ENDS = frozenset('.?!।|')
-# Maximum characters to accumulate before forcing a flush (avoids long silences
-# when the LLM produces punctuation-free text)
-MAX_BUFFER_CHARS = 120
+# Sentence boundary characters
+SENTENCE_ENDS    = frozenset('.?!।|')
+MAX_BUFFER_CHARS = 120   # flush before this many chars even without punctuation
 
 
-# ── helpers ───────────────────────────────────────────────────────────────────
+# ── TTS provider helpers ───────────────────────────────────────────────────────
 
-async def _tts_to_pcm(text: str) -> tuple[bytes, int]:
-    """Call Edge TTS → return (int16 PCM bytes, sample_rate)."""
+async def _sarvam_tts_to_pcm(text: str) -> tuple[bytes, int]:
+    """Call Sarvam bulbul:v2 → (int16 PCM bytes, sample_rate)."""
+    api_key = os.getenv("SARVAM_API_KEY", "")
+    payload = {
+        "inputs": [text],
+        "target_language_code": "te-IN",
+        "speaker": SARVAM_TTS_SPEAKER,
+        "model": "bulbul:v2",
+        "enable_preprocessing": True,
+    }
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                SARVAM_API_URL,
+                json=payload,
+                headers={"api-subscription-key": api_key},
+                timeout=aiohttp.ClientTimeout(total=10),
+            ) as resp:
+                if resp.status != 200:
+                    body = await resp.text()
+                    logger.error("Sarvam TTS error %d: %s", resp.status, body[:200])
+                    return b"", NATIVE_SR
+                data = await resp.json()
+                audio_b64 = data["audios"][0]
+
+        wav_bytes = base64.b64decode(audio_b64)
+        arr, sr = sf.read(io.BytesIO(wav_bytes))
+        if arr.ndim > 1:
+            arr = arr[:, 0]
+        pcm = (np.clip(arr, -1.0, 1.0) * 32767).astype("int16").tobytes()
+        return pcm, int(sr)
+
+    except Exception:
+        logger.exception("Sarvam TTS failed, falling back to Edge TTS")
+        return b"", NATIVE_SR
+
+
+async def _edge_tts_to_pcm(text: str) -> tuple[bytes, int]:
+    """Call Edge TTS → (int16 PCM bytes, sample_rate)."""
     communicate = edge_tts.Communicate(text, EDGE_TTS_VOICE)
     mp3_data = b""
     async for chunk in communicate.stream():
@@ -47,18 +88,29 @@ async def _tts_to_pcm(text: str) -> tuple[bytes, int]:
             mp3_data += chunk["data"]
 
     if not mp3_data:
-        return b"", NATIVE_SR
+        return b"", 24_000
 
-    data, sr = sf.read(io.BytesIO(mp3_data))
-    if data.ndim > 1:
-        data = data[:, 0]                          # stereo → mono
-    pcm = (np.clip(data, -1.0, 1.0) * 32767).astype("int16").tobytes()
+    arr, sr = sf.read(io.BytesIO(mp3_data))
+    if arr.ndim > 1:
+        arr = arr[:, 0]
+    pcm = (np.clip(arr, -1.0, 1.0) * 32767).astype("int16").tobytes()
     return pcm, int(sr)
 
 
+async def _tts_to_pcm(text: str) -> tuple[bytes, int]:
+    """Route to Sarvam TTS if key available, else Edge TTS."""
+    if os.getenv("SARVAM_API_KEY"):
+        pcm, sr = await _sarvam_tts_to_pcm(text)
+        if pcm:
+            return pcm, sr
+        # fall through to Edge TTS on Sarvam failure
+        logger.warning("Sarvam TTS returned empty, using Edge TTS fallback")
+    return await _edge_tts_to_pcm(text)
+
+
 def _push_pcm(pcm: bytes, sr: int, output_emitter: tts.AudioEmitter) -> None:
-    """Push PCM bytes to the audio emitter in 100 ms chunks, then flush."""
-    chunk_size = int(sr * 2 * 0.1)   # 100 ms of 16-bit mono PCM
+    """Push PCM bytes to audio emitter in 100 ms chunks, then flush."""
+    chunk_size = int(sr * 2 * 0.1)  # 100 ms of 16-bit mono
     for offset in range(0, len(pcm), chunk_size):
         chunk = pcm[offset : offset + chunk_size]
         if chunk:
@@ -66,27 +118,24 @@ def _push_pcm(pcm: bytes, sr: int, output_emitter: tts.AudioEmitter) -> None:
     output_emitter.flush()
 
 
-# ── streaming stream ──────────────────────────────────────────────────────────
+# ── streaming synthesis stream ─────────────────────────────────────────────────
 
 class IndicTTSSynthesizeStream(tts.SynthesizeStream):
     """
-    Sentence-level streaming TTS stream.
-
-    Tokens arrive one-by-one from the LLM.  The moment a sentence boundary
-    is detected (or MAX_BUFFER_CHARS is reached), the buffered sentence is
-    sent to Edge TTS.  Audio for that sentence starts playing while the LLM
-    is still generating the remainder of the response.
+    Sentence-level streaming TTS.
+    Flushes to TTS as soon as a sentence boundary is detected so audio
+    starts playing before the LLM finishes the full response.
     """
 
     def __init__(self, tts_instance: "IndicTTS", opts: APIConnectOptions) -> None:
         super().__init__(tts=tts_instance, conn_options=opts)
 
     async def _run(self, output_emitter: tts.AudioEmitter) -> None:
-        buffer       = ""
-        initialized  = False
-        cached_sr    = NATIVE_SR
+        buffer      = ""
+        initialized = False
+        cached_sr   = NATIVE_SR
 
-        async def _flush_buffer(text: str) -> None:
+        async def _flush(text: str) -> None:
             nonlocal initialized, cached_sr
             text = text.strip()
             if not text:
@@ -98,8 +147,9 @@ class IndicTTSSynthesizeStream(tts.SynthesizeStream):
 
             cached_sr = sr
             if not initialized:
+                provider = "Sarvam" if os.getenv("SARVAM_API_KEY") else "Edge"
                 output_emitter.initialize(
-                    request_id="edge_tts",
+                    request_id=f"{provider.lower()}_tts",
                     sample_rate=sr,
                     num_channels=1,
                     mime_type="audio/pcm",
@@ -112,43 +162,39 @@ class IndicTTSSynthesizeStream(tts.SynthesizeStream):
         try:
             async for item in self._input_ch:
                 if isinstance(item, tts.SynthesizeStream._FlushSentinel):
-                    # Explicit flush from the framework
                     if buffer.strip():
-                        await _flush_buffer(buffer)
+                        await _flush(buffer)
                         buffer = ""
                 else:
                     buffer += item
                     stripped = buffer.rstrip()
-                    # Flush on sentence boundary or max-buffer overflow
                     if stripped and (
                         (stripped[-1] in SENTENCE_ENDS and len(stripped) > 4)
                         or len(stripped) >= MAX_BUFFER_CHARS
                     ):
-                        await _flush_buffer(buffer)
+                        await _flush(buffer)
                         buffer = ""
 
-            # Drain any trailing text
             if buffer.strip():
-                await _flush_buffer(buffer)
+                await _flush(buffer)
 
-            # If nothing was pushed (e.g. empty/whitespace response)
             if not initialized:
                 output_emitter.initialize(
-                    request_id="edge_tts",
+                    request_id="tts",
                     sample_rate=NATIVE_SR,
                     num_channels=1,
                     mime_type="audio/pcm",
                 )
 
         except Exception:
-            logger.exception("Edge-TTS streaming synthesis failed")
+            logger.exception("TTS streaming synthesis failed")
             raise
 
 
-# ── batch stream (fallback) ───────────────────────────────────────────────────
+# ── batch synthesis (fallback) ─────────────────────────────────────────────────
 
 class IndicTTSChunkedStream(tts.ChunkedStream):
-    """Batch synthesis (used when the agent calls synthesize() explicitly)."""
+    """Batch synthesis used when the agent calls synthesize() explicitly."""
 
     def __init__(self, tts_instance: "IndicTTS", text: str, opts: APIConnectOptions) -> None:
         super().__init__(tts=tts_instance, input_text=text, conn_options=opts)
@@ -156,11 +202,13 @@ class IndicTTSChunkedStream(tts.ChunkedStream):
     async def _run(self, output_emitter: tts.AudioEmitter) -> None:
         pcm, sr = await _tts_to_pcm(self._input_text)
         if not pcm:
-            raise RuntimeError(f"Edge-TTS returned no audio for: {self._input_text[:60]!r}")
+            raise RuntimeError(f"TTS returned no audio for: {self._input_text[:60]!r}")
 
-        logger.info("TTS batch %d bytes @ %d Hz: %r", len(pcm), sr, self._input_text[:50])
+        provider = "Sarvam" if os.getenv("SARVAM_API_KEY") else "Edge"
+        logger.info("TTS batch %d bytes @ %d Hz (%s): %s",
+                    len(pcm), sr, provider, self._input_text[:50])
         output_emitter.initialize(
-            request_id="edge_tts",
+            request_id=f"{provider.lower()}_tts",
             sample_rate=sr,
             num_channels=1,
             mime_type="audio/pcm",
@@ -168,17 +216,17 @@ class IndicTTSChunkedStream(tts.ChunkedStream):
         _push_pcm(pcm, sr, output_emitter)
 
 
-# ── main TTS class ────────────────────────────────────────────────────────────
+# ── main TTS class ─────────────────────────────────────────────────────────────
 
 class IndicTTS(tts.TTS):
     """
-    Telugu TTS plugin — Edge TTS with sentence-level streaming.
-
-    streaming=True  →  agent uses stream() for low-latency sentence-by-sentence
-                       synthesis while LLM generates the rest of the response.
+    Telugu TTS — Sarvam bulbul:v2 (primary) or Edge TTS (fallback).
+    streaming=True enables sentence-level synthesis for low latency.
     """
 
     def __init__(self) -> None:
+        provider = "Sarvam bulbul:v2" if os.getenv("SARVAM_API_KEY") else "Edge TTS"
+        logger.info("TTS provider: %s", provider)
         super().__init__(
             capabilities=tts.TTSCapabilities(streaming=True),
             sample_rate=NATIVE_SR,

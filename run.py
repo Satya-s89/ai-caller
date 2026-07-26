@@ -41,9 +41,10 @@ def _banner() -> None:
 +------------------------------------------------------+
 |         AI Caller  -  Telugu Voice Assistant         |
 |                                                      |
-|  STT : faster-whisper  (local open-source)           |
-|  LLM : Groq Llama 3.3  (free cloud)                  |
-|  TTS : Edge TTS        (free Microsoft neural)       |
+|  STT : Sarvam saarika-v2.5  (Telugu / Indic)         |
+|  LLM : Groq Llama 3.3      (free cloud)              |
+|  TTS : Sarvam bulbul:v2     (Telugu / Indic)         |
+|  DASH: http://localhost:3000                        |
 +------------------------------------------------------+
 """ + RESET)
 
@@ -111,7 +112,7 @@ def main() -> None:
     if hasattr(signal, "SIGTERM"):
         signal.signal(signal.SIGTERM, _shutdown)
 
-    # Start the LiveKit agent (STT + TTS are embedded as plugins - no separate services needed)
+    # Start the LiveKit agent
     agent_proc = _launch(
         name="AGENT",
         colour=BLUE,
@@ -119,15 +120,25 @@ def main() -> None:
         cwd=AGENT_DIR,
     )
 
+    # Start the Call Dashboard server
+    dash_proc = _launch(
+        name="DASHBOARD",
+        colour=GREEN,
+        cmd=[sys.executable, str(ROOT / "dashboard" / "app.py")],
+        cwd=ROOT,
+    )
+
     print(f"""
 {GREEN}All services started!
 
-  Open the LiveKit Playground:
-    https://agents-playground.livekit.io
+  Live Call Dashboard:
+    http://localhost:3000
 
-  Connect with:
-    URL   : wss://ai-voice-1a5zwk2f.livekit.cloud
-    Agent : telugu-voice-agent
+  LiveKit Playground:
+    https://agents-playground.livekit.io (URL: wss://ai-voice-1a5zwk2f.livekit.cloud)
+
+  Twilio Phone Number:
+    +1 517 551 2681
 
   Press Ctrl+C to stop everything.
 {RESET}""")
