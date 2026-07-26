@@ -58,7 +58,8 @@ def create_app() -> web.Application:
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
-    base_port = int(os.getenv("DASHBOARD_PORT", "3000"))
+    # Railway sets PORT automatically; fall back to DASHBOARD_PORT or 3000
+    base_port = int(os.getenv("PORT") or os.getenv("DASHBOARD_PORT", "3000"))
     for p in range(base_port, base_port + 10):
         try:
             print(f"🚀 Call Dashboard starting at http://localhost:{p}")
