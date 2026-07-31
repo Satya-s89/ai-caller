@@ -140,7 +140,7 @@ class SarvamSTT(stt.STT):
                     SARVAM_API_URL,
                     headers=headers,
                     data=form,
-                    timeout=aiohttp.ClientTimeout(total=10),
+                    timeout=aiohttp.ClientTimeout(total=20),
                 ) as resp:
                     if resp.status != 200:
                         body = await resp.text()

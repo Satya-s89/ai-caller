@@ -8,9 +8,16 @@ Wired into an AgentSession in main.py.
 from __future__ import annotations
 
 import logging
+import sys
+from pathlib import Path
 from livekit.agents import Agent
 from livekit.agents import stt, tts, llm
 from livekit.agents.llm import find_function_tools
+
+# Ensure project root is on the path so crm/ and call_log/ are importable
+_ROOT = Path(__file__).resolve().parent.parent
+if str(_ROOT) not in sys.path:
+    sys.path.insert(0, str(_ROOT))
 
 SYSTEM_PROMPT = """\
 You are a smart, helpful AI assistant — like Siri or Google Assistant, but in Telugu.
@@ -70,9 +77,6 @@ class AssistantTools(llm.ToolContext):
     ) -> str:
         """Called when the user asks about their account status, balance, or standing."""
         logger.info(f"Checking account status for {phone_number}")
-        import sys
-        from pathlib import Path
-        sys.path.append(str(Path(__file__).resolve().parent.parent))
         import crm.db
         
         customer = crm.db.get_customer_status(phone_number)
@@ -92,9 +96,6 @@ class AssistantTools(llm.ToolContext):
     ) -> str:
         """Called when the user asks when a store opens or closes."""
         logger.info(f"Getting store hours for {location}")
-        import sys
-        from pathlib import Path
-        sys.path.append(str(Path(__file__).resolve().parent.parent))
         import crm.db
         
         store = crm.db.get_store_info(location)

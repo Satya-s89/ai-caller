@@ -19,6 +19,7 @@ import base64
 import io
 import logging
 import os
+import subprocess
 
 import aiohttp
 import edge_tts
@@ -65,10 +66,14 @@ async def _sarvam_tts_to_pcm(text: str) -> tuple[bytes, int]:
                     logger.error("Sarvam TTS error %d: %s", resp.status, body[:200])
                     return b"", NATIVE_SR
                 data = await resp.json()
-                audio_b64 = data["audios"][0]
+                audios = data.get("audios", [])
+                if not audios:
+                    logger.error("Sarvam TTS: no 'audios' in response: %s", str(data)[:200])
+                    return b"", NATIVE_SR
+                audio_b64 = audios[0]
 
         wav_bytes = base64.b64decode(audio_b64)
-        arr, sr = sf.read(io.BytesIO(wav_bytes))
+        arr, sr = sf.read(io.BytesIO(wav_bytes))  # Sarvam returns WAV
         if arr.ndim > 1:
             arr = arr[:, 0]
         pcm = (np.clip(arr, -1.0, 1.0) * 32767).astype("int16").tobytes()
@@ -80,7 +85,11 @@ async def _sarvam_tts_to_pcm(text: str) -> tuple[bytes, int]:
 
 
 async def _edge_tts_to_pcm(text: str) -> tuple[bytes, int]:
-    """Call Edge TTS → (int16 PCM bytes, sample_rate)."""
+    """Call Edge TTS → (int16 PCM bytes, sample_rate).
+
+    Edge TTS streams MP3 audio. soundfile cannot read MP3 without special
+    libsndfile build, so we decode via ffmpeg subprocess when available.
+    """
     communicate = edge_tts.Communicate(text, EDGE_TTS_VOICE)
     mp3_data = b""
     async for chunk in communicate.stream():
@@ -90,11 +99,38 @@ async def _edge_tts_to_pcm(text: str) -> tuple[bytes, int]:
     if not mp3_data:
         return b"", 24_000
 
-    arr, sr = sf.read(io.BytesIO(mp3_data))
-    if arr.ndim > 1:
-        arr = arr[:, 0]
-    pcm = (np.clip(arr, -1.0, 1.0) * 32767).astype("int16").tobytes()
-    return pcm, int(sr)
+    # Try soundfile first (works if libsndfile was built with MP3/sndio support)
+    try:
+        arr, sr = sf.read(io.BytesIO(mp3_data))
+        if arr.ndim > 1:
+            arr = arr[:, 0]
+        pcm = (np.clip(arr, -1.0, 1.0) * 32767).astype("int16").tobytes()
+        return pcm, int(sr)
+    except Exception:
+        pass  # fall through to ffmpeg
+
+    # Fallback: decode MP3 → raw s16le PCM via ffmpeg (no extra Python deps)
+    try:
+        result = subprocess.run(
+            [
+                "ffmpeg", "-i", "pipe:0",
+                "-f", "s16le", "-ar", "24000", "-ac", "1",
+                "pipe:1", "-loglevel", "quiet",
+            ],
+            input=mp3_data,
+            capture_output=True,
+            timeout=15,
+        )
+        if result.returncode == 0 and result.stdout:
+            logger.debug("Edge TTS: decoded MP3 via ffmpeg (%d bytes)", len(result.stdout))
+            return result.stdout, 24_000
+        logger.error("Edge TTS ffmpeg decode failed: %s", result.stderr[:200])
+    except FileNotFoundError:
+        logger.error("Edge TTS: ffmpeg not found — install ffmpeg to use Edge TTS fallback")
+    except Exception:
+        logger.exception("Edge TTS: ffmpeg fallback failed")
+
+    return b"", 24_000
 
 
 async def _tts_to_pcm(text: str) -> tuple[bytes, int]:

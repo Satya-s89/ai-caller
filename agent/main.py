@@ -112,8 +112,6 @@ async def entrypoint(ctx: JobContext) -> None:
         tts=tts_instance,
         fnc_ctx=fnc_ctx,
     )
-    # The agent class uses the VAD from session or agent property
-    agent._vad = vad_instance
 
     session = AgentSession(
         stt=stt_instance,

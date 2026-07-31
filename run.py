@@ -148,6 +148,14 @@ def main() -> None:
             if agent_proc.poll() is not None:
                 print(f"\n{RED}[LAUNCHER] Agent exited (code {agent_proc.returncode}).{RESET}")
                 _shutdown()
+            if dash_proc.poll() is not None:
+                print(f"\n{YELLOW}[LAUNCHER] Dashboard exited (code {dash_proc.returncode}) — restarting...{RESET}")
+                dash_proc = _launch(
+                    name="DASHBOARD",
+                    colour=GREEN,
+                    cmd=[sys.executable, str(ROOT / "dashboard" / "app.py")],
+                    cwd=ROOT,
+                )
             time.sleep(1)
     except KeyboardInterrupt:
         _shutdown()
